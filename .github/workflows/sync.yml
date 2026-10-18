@@ -1,0 +1,46 @@
+name: Sync truck data
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 min (GitHub may delay a few minutes)
+  workflow_dispatch:          # manual "Run workflow" button
+    inputs:
+      seed:
+        description: "Mock mode only: also create 3 days of fake history"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    # Scheduled runs only happen in real mode. In mock mode, run it manually.
+    if: github.event_name == 'workflow_dispatch' || vars.USE_MOCK == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run sync
+        run: python -m src.main ${{ inputs.seed && '--seed' || '' }}
+        env:
+          USE_MOCK: ${{ vars.USE_MOCK || 'true' }}
+          LECLERC_SHEET_ID: ${{ vars.LECLERC_SHEET_ID }}
+          LECLERC_WORKSHEET: ${{ vars.LECLERC_WORKSHEET || 'Sheet1' }}
+          MASTER_SHEET_ID: ${{ vars.MASTER_SHEET_ID }}
+          GEO_API_URL: ${{ vars.GEO_API_URL }}
+          GEO_API_KEY: ${{ secrets.GEO_API_KEY }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      # Mock mode only: save the fake CSVs in the repo so the dashboard can read them.
+      # In real mode data goes to Google Sheets and is NEVER committed to GitHub.
+      - name: Save mock data to repo
+        if: ${{ (vars.USE_MOCK || 'true') == 'true' }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data
+          git diff --cached --quiet || (git commit -m "update mock data" && git push)
